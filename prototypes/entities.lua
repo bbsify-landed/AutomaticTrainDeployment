@@ -70,3 +70,38 @@ data:extend({
     cleaner,
     cleaner_interface
 })
+
+-- Create source train stop station
+local source = util.table.deepcopy(base_train_stop)
+source.name = "atd-source"
+source.minable.result = "atd-source"
+source.light1.light.color = {r = 0.1, g = 0.1, b = 0.9} -- Blue light
+source.color = {r = 0.1, g = 0.1, b = 0.9}
+source.chart_color = {r = 0.1, g = 0.1, b = 0.9}
+source.map_color = {r = 0.1, g = 0.1, b = 0.9}
+
+-- Source interface entity
+local source_interface = {
+    type = "simple-entity",
+    name = "atd-source-interface",
+    icon = "__AutomaticTrainDeployment_SpaceAge__/graphics/icons/train-stop.png",
+    icon_size = 64,
+    icon_mipmaps = 4,
+    flags = {"not-on-map", "placeable-off-grid"},
+    collision_mask = {
+        layers = {}  -- In Factorio 2.0, collision_mask needs a layers table
+    },
+    collision_box = {{-0.1, -0.1}, {0.1, 0.1}},
+    selectable_in_game = false,
+    picture = {
+        filename = "__core__/graphics/empty.png",
+        priority = "low",
+        width = 1,
+        height = 1
+    }
+}
+
+data:extend({
+    source,
+    source_interface
+})

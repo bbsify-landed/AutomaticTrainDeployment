@@ -8,6 +8,10 @@ data:extend({
         effects = {
             {
                 type = "unlock-recipe",
+                recipe = "atd-source"
+            },
+            {
+                type = "unlock-recipe",
                 recipe = "atd-deployer"
             },
             {
