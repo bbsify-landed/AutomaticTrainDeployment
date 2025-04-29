@@ -92,66 +92,12 @@ end
 -- Get the train composition from a source station, including carriage details
 local function get_source_composition(source_station)
     log_message("Getting source train composition from " .. source_station.backer_name)
-    
-    -- Find all trains stopped at the source station
-    local trains = source_station.get_train_stop_trains()
-    if #trains == 0 then
-        log_message("No source train found at " .. source_station.backer_name)
-        return nil
-    end
-    
-    -- Get the first train at the station
-    local source_train = trains[1]
-    log_message("Found source train with ID " .. source_train.id)
-    
-    -- Get the detailed composition of the source train with position and orientation
-    local composition = {}
-    
-    -- Record reference position (first carriage position)
-    local reference_position = nil
-    if #source_train.carriages > 0 then
-        reference_position = {
-            x = source_train.carriages[1].position.x,
-            y = source_train.carriages[1].position.y
-        }
-    else
-        log_message("Train has no carriages")
+    local source_train = source_station.get_stopped_train()
+    if not (source_train and source_train.valid) then
         return nil, nil
     end
     
-    -- Store each carriage's details
-    for i, carriage in ipairs(source_train.carriages) do
-        -- Calculate offset relative to the first carriage
-        local offset = {
-            x = carriage.position.x - reference_position.x,
-            y = carriage.position.y - reference_position.y
-        }
-        
-        -- Add carriage details to composition
-        table.insert(composition, {
-            name = carriage.name,
-            type = carriage.type,
-            orientation = carriage.orientation,
-            offset = offset
-        })
-        
-        log_message("Recorded carriage " .. i .. " of type " .. carriage.type .. 
-                   " with orientation " .. carriage.orientation .. 
-                   " at offset " .. serpent.line(offset))
-    end
-    
-    return composition, source_train
-end
-
--- Find rail at position
-local function find_rail_at_position(surface, position)
-    local rail = surface.find_entities_filtered{
-        position = position,
-        type = {"straight-rail", "curved-rail"},
-        limit = 1
-    }[1]
-    
-    return rail
+    return source_train.carriages, source_train
 end
 
 -- Deploy a new train from a source train
@@ -180,149 +126,58 @@ local function deploy_train(deployer, source_station, source_train)
         return false
     end
     
-    -- Get the reference position (deployer interface)
-    local interface = deployer.interface
-    local deploy_position = interface.position
-    local deploy_direction = interface.direction
-    
-    log_message("Deployer position: " .. serpent.line(deploy_position) .. 
-               " with direction: " .. deploy_direction)
-    
-    -- Find rail at deployer position
-    local rail = find_rail_at_position(interface.surface, deploy_position)
-    if not rail then
-        log_message("No rail found at deployer position")
+    local curr_rail_dir = deployer.entity.connected_rail_direction
+    local connected_rail = deployer.entity.connected_rail
+    if not (connected_rail and connected_rail.valid) then
+        log_message("Invalid connected rail")
         return false
     end
-    
-    -- Create a new train with the source composition
-    local created_carriages = {}
-    
-    -- Create each carriage at the exact offset from the deployer, adjusting direction
-    for i, carriage_data in ipairs(source_composition) do
-        -- Apply directional rotation to the offset coordinates
-        local rotated_offset = {x = 0, y = 0}
-        
-        if deploy_direction == defines.direction.north then
-            -- North: Use original offset
-            rotated_offset.x = carriage_data.offset.x
-            rotated_offset.y = carriage_data.offset.y
-        elseif deploy_direction == defines.direction.east then
-            -- East: Rotate 90° clockwise (x becomes y, y becomes -x)
-            rotated_offset.x = carriage_data.offset.y
-            rotated_offset.y = -carriage_data.offset.x
-        elseif deploy_direction == defines.direction.south then
-            -- South: Rotate 180° (x becomes -x, y becomes -y)
-            rotated_offset.x = -carriage_data.offset.x
-            rotated_offset.y = -carriage_data.offset.y
-        elseif deploy_direction == defines.direction.west then
-            -- West: Rotate 270° clockwise (x becomes -y, y becomes x)
-            rotated_offset.x = -carriage_data.offset.y
-            rotated_offset.y = carriage_data.offset.x
-        end
-        
-        -- Calculate final position
-        local position = {
-            x = deploy_position.x + rotated_offset.x,
-            y = deploy_position.y + rotated_offset.y
-        }
-        
-        -- Find rail at this position
-        local current_rail = find_rail_at_position(interface.surface, position)
-        if not current_rail then
-            log_message("No rail found at position " .. serpent.line(position) .. " for carriage " .. i)
-            -- Try to find the nearest rail within a small radius
-            local nearby_rails = interface.surface.find_entities_filtered{
-                position = position,
-                type = {"straight-rail", "curved-rail"},
-                radius = 2
-            }
-            
-            if #nearby_rails > 0 then
-                current_rail = nearby_rails[1]
-                position = current_rail.position
-                log_message("Found nearby rail at " .. serpent.line(position))
-            else
-                -- Skip this carriage if no rail found
-                log_message("Skipping carriage " .. i .. " due to missing rail")
-                goto continue
-            end
-        end
-        
-        -- Calculate entity orientation based on source orientation and deployer direction
-        local orientation = (carriage_data.orientation + (deploy_direction / 8)) % 1
-        
-        -- For locomotives, determine if we need to flip the orientation
-        local entity_direction = deploy_direction
-        if carriage_data.type == "locomotive" then
-            -- Check if this is originally a backward-facing locomotive
-            local orig_direction = math.floor(carriage_data.orientation * 8)
-            local is_backward = (orig_direction >= 2 and orig_direction <= 6)
-            
-            if is_backward then
-                entity_direction = (deploy_direction + 4) % 8
-            end
-        end
-        
-        log_message("Creating " .. carriage_data.type .. " '" .. carriage_data.name .. 
-                   "' at position " .. serpent.line(position) .. 
-                   " with orientation " .. orientation .. 
-                   " and direction " .. entity_direction)
-        
-        -- Create the entity directly on the rail
-        local entity = interface.surface.create_entity{
-            name = carriage_data.name,
-            position = position,
-            direction = entity_direction,
-            orientation = orientation,
-            force = interface.force,
-            raise_built = true
-        }
-        
-        if entity then
-            table.insert(created_carriages, entity)
-        else
-            log_message("Failed to create entity: " .. carriage_data.name)
-        end
-        
-        ::continue::
+
+    local rail_end = connected_rail.get_rail_end(curr_rail_dir)
+    rail_end.flip_direction()
+    local made_space = rail_end.move_natural() and rail_end.move_natural()
+    if not made_space then
+        log_message("Failed to make space for new train")
+        return false
     end
-    
-    -- Connect the carriages to form a train
-    if #created_carriages > 1 then
-        for i = 1, #created_carriages - 1 do
-            local success = pcall(function()
-                created_carriages[i].connect_rolling_stock(defines.rail_direction.back)
-            end)
-            
-            if not success then
-                log_message("Failed to connect carriage " .. i .. " to " .. (i+1))
-            end
-        end
-    end
-    
-    -- Get the newly created train
-    if #created_carriages > 0 then
-        local new_train = created_carriages[1].train
+
+    local curr_carriage = nil
+    local composition_idx = 1
+    local iters = 0
+    while composition_idx <= #source_composition and iters < 100 do
+        log_message("Deploying carriage " .. composition_idx .. "/" .. #source_composition)
+        local carriage = source_composition[composition_idx]
         
-        -- Copy the schedule if the source train has one
-        if source_train.schedule then
-            log_message("Copying schedule from source train")
-            local schedule = util.table.deepcopy(source_train.schedule)
-            
-            -- Set the train to automatic mode (if needed)
-            new_train.schedule = schedule
-            new_train.manual_mode = false
-            
-            log_message("New train created successfully with ID: " .. new_train.id)
-            return true
-        else
-            log_message("Source train has no schedule")
+        if not (rail_end and rail_end.valid) then
+            log_message("Ran out of rail")
             return false
         end
-    else
-        log_message("Failed to create any carriages")
-        return false
+
+        log_message("Deploying to rail: " .. serpent.line(rail_end.rail.position))
+
+        local new_carriage = carriage.clone{
+            position = rail_end.rail.position,
+        }
+        if new_carriage and new_carriage.valid then
+            log_message("Cloned carriage: " .. new_carriage.name)
+            composition_idx = composition_idx + 1
+            if curr_carriage and curr_carriage.valid then
+                curr_carriage.connect_rolling_stock(curr_rail_dir)
+            end
+            curr_carriage = new_carriage
+        end
+
+        local moved = rail_end.move_natural()
+        if not moved then
+            log_message("Ran out of rail")
+            return false
+        end
+
+        iters = iters + 1
+    end
+    
+    if curr_carriage and curr_carriage.valid then
+        curr_carriage.train.manual_mode = false
     end
 end
 
@@ -423,37 +278,16 @@ local function handle_train_changed_state(event)
     end
 end
 
-local source_metatable =
-{
-    __index = function(key)
-        return "no value for key " .. key
-    end
-}
-local deployer_metatable =
-{
-    __index = function(key)
-        return "no value for key " .. key
-    end
-}
-local cleaner_metatable =
-{
-    __index = function(key)
-        return "no value for key " .. key
-    end
-}
-script.register_metatable("atd-source", source_metatable)
-script.register_metatable("atd-deployer", deployer_metatable)
-script.register_metatable("atd-cleaner", cleaner_metatable)
-
 -- Initialize or update stored stations
 local function initialize()
     -- Reset all station registers
-    sources = {}
-    deployers = {}
-    cleaners = {}
-    setmetatable(sources, source_metatable)
-    setmetatable(deployers, deployer_metatable)
-    setmetatable(cleaners, cleaner_metatable)
+    storage.sources = {}
+    storage.deployers = {}
+    storage.cleaners = {}
+
+    sources = storage.sources
+    deployers = storage.deployers
+    cleaners = storage.cleaners
     
     log_message("Initializing mod")
     
@@ -543,9 +377,9 @@ local function initialize()
 end
 
 local function load()
-    setmetatable(sources, source_metatable)
-    setmetatable(deployers, deployer_metatable)
-    setmetatable(cleaners, cleaner_metatable)
+    sources = storage.sources
+    deployers = storage.deployers
+    cleaners = storage.cleaners
 end
 
 -- Check circuit conditions every 30 ticks (0.5 seconds)
@@ -569,4 +403,4 @@ script.on_event(defines.events.on_object_destroyed, track_entities_removal)
 script.on_event(defines.events.on_train_changed_state, handle_train_changed_state)
 
 -- Set up the nth tick handler
-script.on_nth_tick(30, on_nth_tick)
+script.on_nth_tick(1, on_nth_tick)
