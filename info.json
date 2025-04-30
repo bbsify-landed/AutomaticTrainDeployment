@@ -1,8 +1,8 @@
 {
     "name": "AutomaticTrainDeployment_SpaceAge",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "title": "Automatic Train Deployment for Space Age",
-    "author": "bbsify (updated from Till223's version)",
+    "author": "bbsify",
     "contact": "leon@bbsify.com",
     "homepage": "github.com/bbsify/AutomaticTrainDeployment",
     "factorio_version": "2.0",
