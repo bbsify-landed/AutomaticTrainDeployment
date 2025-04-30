@@ -1,14 +1,13 @@
 {
     "name": "AutomaticTrainDeployment_SpaceAge",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "title": "Automatic Train Deployment for Space Age",
     "author": "bbsify",
     "contact": "leon@bbsify.com",
     "homepage": "github.com/bbsify/AutomaticTrainDeployment",
     "factorio_version": "2.0",
     "dependencies": [
-        "base >= 2.0",
-        "space-age >= 2.0.0"
+        "base >= 2.0"
     ],
     "description": "Adds stations that will automatically deploy/remove trains. Updated for Factorio 2.0 and Space Age 2.0."
 }
