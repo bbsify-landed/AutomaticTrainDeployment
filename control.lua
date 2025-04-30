@@ -326,24 +326,13 @@ local function handle_train_changed_state(event)
     if (state == defines.train_state.wait_station or state == defines.train_state.arrive_station) then
         local station = train.station
         if not (station and station.valid) then 
-            log_message("No valid station")
             return 
         end
-        
-        log_message("Train at station: " .. station.backer_name)
-        
-        -- Check if the train is at a cleaner station
-        local cleaner = nil
-        for _, clean in pairs(cleaners) do
-            if clean.entity.valid and clean.entity.backer_name == station.backer_name then
-                cleaner = clean
-                log_message("Found matching cleaner: " .. station.backer_name)
-                break
-            end
-        end
-        
-        -- If it's at a cleaner, remove the train
-        if cleaner and cleaner.entity.valid then
+
+        log_message("Train " .. train.id .. " arrived at station: " .. station.name .. " " .. station.backer_name)
+
+        if station.name == "atd-cleaner" then
+            -- If it's at a cleaner, remove the train
             log_message("Cleaning train at station: " .. station.backer_name)
             for _, carriage in ipairs(train.carriages) do
                 if carriage.valid then
