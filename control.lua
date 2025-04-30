@@ -7,8 +7,22 @@ local sources = {}     -- Train source stations
 local deployers = {}   -- Train deployer stations
 local cleaners = {}    -- Train cleaner stations
 
+-- trains can't be in different orientations than this
+local direction_to_orientation = {
+    [defines.direction.north] = 0,
+    [defines.direction.east] = 0.25,
+    [defines.direction.south] = 0.5,
+    [defines.direction.west] = 0.75,
+}
+local function orientation_to_direction(o)
+    return (o * 16) % 16
+end
+
+local debug = false
+
 -- Add logging function for easier debugging
 local function log_message(message)
+    if not debug then return end
     log("[ATD] " .. message)
 end
 
@@ -91,7 +105,6 @@ end
 
 -- Get the train composition from a source station, including carriage details
 local function get_source_composition(source_station)
-    log_message("Getting source train composition from " .. source_station.backer_name)
     local source_train = source_station.get_stopped_train()
     if not (source_train and source_train.valid) then
         return nil, nil
@@ -117,8 +130,6 @@ local function deploy_train(deployer, source_station, source_train)
         return false
     end
     
-    log_message("Deploying train from source: " .. source_station.backer_name)
-    
     -- Get the source train composition with detailed carriage information
     local source_composition, _ = get_source_composition(source_station)
     if not source_composition then
@@ -132,6 +143,21 @@ local function deploy_train(deployer, source_station, source_train)
         log_message("Invalid connected rail")
         return false
     end
+    if connected_rail.trains_in_block > 0 then
+        return false
+    end
+
+    local source_station_orientation = direction_to_orientation[source_station.direction]
+    local deployer_orientation = direction_to_orientation[deployer.entity.direction]
+
+    log_message("Source station orientation: " .. source_station_orientation)
+    log_message("Deployer orientation: " .. deployer_orientation)
+
+    local orientation_diff = deployer_orientation - source_station_orientation
+    if orientation_diff < 0 then
+        orientation_diff = orientation_diff + 1
+    end
+    log_message("Orientation difference: " .. orientation_diff)
 
     local rail_end = connected_rail.get_rail_end(curr_rail_dir)
     rail_end.flip_direction()
@@ -147,7 +173,7 @@ local function deploy_train(deployer, source_station, source_train)
     while composition_idx <= #source_composition and iters < 100 do
         log_message("Deploying carriage " .. composition_idx .. "/" .. #source_composition)
         local carriage = source_composition[composition_idx]
-        
+
         if not (rail_end and rail_end.valid) then
             log_message("Ran out of rail")
             return false
@@ -155,12 +181,63 @@ local function deploy_train(deployer, source_station, source_train)
 
         log_message("Deploying to rail: " .. serpent.line(rail_end.rail.position))
 
-        local new_carriage = carriage.clone{
+        local orientation = carriage.orientation + orientation_diff
+        if orientation >= 1 then
+            orientation = orientation - 1
+        end
+        log_message("Carriage orientation: " .. orientation)
+
+        local new_carriage = deployer.entity.surface.create_entity{
+            name = carriage.name,
+            orientation = orientation,
             position = rail_end.rail.position,
+            force = deployer.entity.force,
         }
+
         if new_carriage and new_carriage.valid then
-            log_message("Cloned carriage: " .. new_carriage.name)
             composition_idx = composition_idx + 1
+
+            -- if locomotive, copy fuel inventory
+            if new_carriage.type == "locomotive" then
+                local fuel_inventory = new_carriage.get_fuel_inventory()
+                if fuel_inventory and fuel_inventory.valid then
+                    local source_fuel_inventory = carriage.get_fuel_inventory()
+                    if source_fuel_inventory and source_fuel_inventory.valid then
+                        for i = 1, #source_fuel_inventory do
+                            local item = source_fuel_inventory[i]
+                            if item and item.valid_for_read then
+                                fuel_inventory.insert(item)
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- if cargo wagon, copy contents
+            if new_carriage.type == "cargo-wagon" then
+                local cargo_inventory = new_carriage.get_inventory(defines.inventory.cargo_wagon)
+                if cargo_inventory and cargo_inventory.valid then
+                    local source_cargo_inventory = carriage.get_inventory(defines.inventory.cargo_wagon)
+                    if source_cargo_inventory and source_cargo_inventory.valid then
+                        for i = 1, #source_cargo_inventory do
+                            local item = source_cargo_inventory[i]
+                            if item and item.valid_for_read then
+                                cargo_inventory.insert(item)
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- if fluid wagon, copy contents
+            if new_carriage.type == "fluid-wagon" then
+                local fc = carriage.get_fluid_contents()
+                for name, amount in pairs(fc) do
+                    new_carriage.insert_fluid({name = name, amount = amount})
+                end
+            end
+        
+
             if curr_carriage and curr_carriage.valid then
                 curr_carriage.connect_rolling_stock(curr_rail_dir)
             end
@@ -177,7 +254,8 @@ local function deploy_train(deployer, source_station, source_train)
     end
     
     if curr_carriage and curr_carriage.valid then
-        curr_carriage.train.manual_mode = false
+        curr_carriage.train.schedule = source_train.schedule
+        curr_carriage.train.manual_mode = source_train.manual_mode
     end
 end
 
@@ -210,8 +288,6 @@ local function check_circuit_conditions()
                 
                 -- Check if the signal has increased (positive edge trigger)
                 if deploy_signal > deployer.last_signal and deploy_signal > 0 then
-                    log_message("Deploy signal received: " .. deploy_signal)
-                    
                     -- Find a source train to deploy
                     -- Same name as the deployer indicates the source
                     local source_name = deployer.entity.backer_name
